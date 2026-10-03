@@ -1,0 +1,89 @@
+name: Build and release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCEMOD_RELEASE: 1.12.0.7255
+  SOURCEMOD_PACKAGE: 1.12.0-git7255
+  SPCOMP_VERSION: 1.12.0.7255
+
+jobs:
+  build:
+    name: Build with spcomp 1.12.0.7255
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download SourceMod compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            "https://github.com/alliedmodders/sourcemod/releases/download/${SOURCEMOD_RELEASE}/sourcemod-${SOURCEMOD_PACKAGE}-linux.tar.gz" \
+            --output sourcemod.tar.gz
+          mkdir -p .build/sourcemod
+          tar -xzf sourcemod.tar.gz -C .build/sourcemod
+          chmod +x .build/sourcemod/addons/sourcemod/scripting/spcomp64
+
+      - name: Verify spcomp version
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler_output="$(.build/sourcemod/addons/sourcemod/scripting/spcomp64 2>&1 || true)"
+          echo "${compiler_output}"
+          grep -F "SourcePawn Compiler ${SPCOMP_VERSION}" <<<"${compiler_output}"
+
+      - name: Compile plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          .build/sourcemod/addons/sourcemod/scripting/spcomp64 \
+            addons/sourcemod/scripting/weapon_replace.sp \
+            -i.build/sourcemod/addons/sourcemod/scripting/include \
+            -odist/weapon_replace.smx
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weapon_replace-spcomp-${{ env.SPCOMP_VERSION }}
+          path: dist/weapon_replace.smx
+          if-no-files-found: error
+
+      - name: Upload release input
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-input
+          path: dist/weapon_replace.smx
+          if-no-files-found: error
+
+  release:
+    name: Publish release with spcomp 1.12.0.7255
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release input
+        uses: actions/download-artifact@v4
+        with:
+          name: release-input
+          path: dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Weapon Replace ${{ github.ref_name }} (spcomp ${{ env.SPCOMP_VERSION }})
+          generate_release_notes: true
+          files: dist/weapon_replace.smx

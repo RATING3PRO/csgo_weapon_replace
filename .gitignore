@@ -1,0 +1,3 @@
+# SourcePawn build output
+addons/sourcemod/plugins/*.smx
+dist/
